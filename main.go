@@ -8,29 +8,24 @@ import (
 	"log"
 	"net"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 )
 
 var (
-	logger           *log.Logger
-	startTime        time.Time
-	allUsers         []user
-	rooms                     = make([][]user, 3, 4)
-	roomsHistory              = make([][]string, 3, 10)
-	channelSlice              = make([]chan [3]string, 0)
-	categories       []string = []string{"Dogs", "Cats", "Dolphins"}
-	roomZeroHistChan          = make(chan string)
-	roomOneHistChan           = make(chan string)
-	roomTwoHistChan           = make(chan string)
-	subChannel                = make(chan []interface{})
-	newCatChannel             = make(chan [2]interface{})
-	joinChan                  = make(chan net.Conn)
-	requestsMonitor           = expvar.NewInt("Total Requests")
-	invalidRequests           = expvar.NewInt("Total invalid requests")
-	totalUsers                = expvar.NewInt(("Total Users"))
-	newMessage                = make(chan [3]string)
+	logger          *log.Logger
+	startTime       time.Time
+	allUsers        []user
+	rooms           = make(map[string][]user)
+	roomsHistory    = make([][]string, 0, 10)
+	categories      = make([]string, 0, 10)
+	subChannel      = make(chan []interface{})
+	newCatChannel   = make(chan [2]interface{})
+	joinChan        = make(chan net.Conn)
+	requestsMonitor = expvar.NewInt("Total Requests")
+	invalidRequests = expvar.NewInt("Total invalid requests")
+	totalUsers      = expvar.NewInt(("Total Users"))
+	newMessage      = make(chan [3]string)
 )
 
 type user struct {
@@ -45,12 +40,6 @@ func init() {
 	}
 	logger = log.New(file, "", log.Ldate|log.Ltime|log.Lshortfile)
 
-	//initializing slices for rooms and room chat history
-	for i := 0; i < 3; i++ {
-		rooms[i] = make([]user, 0)
-		roomsHistory[i] = make([]string, 0)
-		channelSlice = append(channelSlice, make(chan [3]string))
-	}
 }
 
 func startTCP() {
@@ -107,13 +96,21 @@ func handler(conn net.Conn) {
 			}
 		case "SUB":
 			var subArr = make([]interface{}, 2)
-			roomNum, err := strconv.Atoi(fields[1])
-			if err != nil {
-				panic(err)
-			}
-			subArr[0] = roomNum
+			subArr[0] = fields[1]
 			subArr[1] = conn
-			subChannel <- subArr
+			inRoom := false
+			for _, v := range rooms[fields[1]] {
+				if v.address == conn {
+					inRoom = true
+					break
+				}
+			}
+			switch inRoom {
+			case true:
+				io.WriteString(conn, "You are already subscribed to this channel!\n")
+			case false:
+				subChannel <- subArr
+			}
 
 		case "NICK":
 			newName := fields[1]
@@ -163,46 +160,34 @@ func handler(conn net.Conn) {
 	}
 }
 
-func historyStorage() {
-	for {
-		select {
-		case msg := <-roomZeroHistChan:
-			roomsHistory[0] = append(roomsHistory[0], msg)
-		case msg := <-roomOneHistChan:
-			roomsHistory[1] = append(roomsHistory[1], msg)
-		case msg := <-roomTwoHistChan:
-			roomsHistory[2] = append(roomsHistory[2], msg)
-		}
-	}
-}
-
 func msgBroadcast() {
 	for {
 		select {
 
 		case msg := <-newMessage:
 			msgString := fmt.Sprintf("%v wrote on channel %v: %v\n", msg[0], msg[1], msg[2])
-			roomNum, err := strconv.Atoi(msg[1])
-			if err != nil {
-				panic(err)
-			}
-			roomZeroHistChan <- msgString
-			for _, v := range rooms[roomNum] {
+			roomName := msg[1]
+			for _, v := range rooms[roomName] {
 				conn := v.address
 				io.WriteString(conn, msgString)
 			}
 		case new := <-newCatChannel:
+			var newUser user
+			catName := new[1].(string)
+			newUser.address = new[0].(net.Conn)
 			categories = append(categories, new[1].(string))
-			rooms = append(rooms, make([]user, 0, 10))
+			rooms[catName] = make([]user, 0, 10)
+			rooms[catName] = append(rooms[catName], newUser)
 
 		case sub := <-subChannel:
 
 			var user user
-			roomNum := sub[0].(int)
+			roomName := sub[0].(string)
 			user.address = sub[1].(net.Conn)
 
-			rooms[roomNum] = append(rooms[roomNum], user)
-			fmt.Println(rooms[roomNum])
+			rooms[roomName] = append(rooms[roomName], user)
+			fmt.Println(rooms[roomName])
+
 		}
 	}
 }
@@ -210,7 +195,6 @@ func msgBroadcast() {
 func main() {
 	go startTCP()
 	go msgBroadcast()
-	go historyStorage()
 	go userJoin()
 
 	fmt.Scanln()
