@@ -88,7 +88,7 @@ func handler(conn net.Conn) {
 		}
 		switch fields[0] {
 		case "CMD":
-			io.WriteString(conn, "LIST: Shows list of categories\nPUB (category number): Publishes message in category subscribers\nSUB(category number): subscribes you to that category\nNICK (name): Changes your nickname\n")
+			io.WriteString(conn, "LIST: Shows list of categories\nPUB (category name): Publishes message in category subscribers\nSUB(category name): subscribes you to that category\nNICK (name): Changes your nickname\n")
 		case "LIST":
 			io.WriteString(conn, "List of categories are:\n")
 			for k, v := range categories {
