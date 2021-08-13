@@ -17,13 +17,14 @@ var (
 	logger           *log.Logger
 	startTime        time.Time
 	allUsers         []user
-	rooms                     = make([][]user, 3)
-	roomsHistory              = make([][]string, 3)
+	rooms                     = make([][]user, 3, 4)
+	roomsHistory              = make([][]string, 3, 10)
 	channelSlice              = make([]chan [3]string, 0)
 	categories       []string = []string{"Dogs", "Cats", "Dolphins"}
 	roomZeroHistChan          = make(chan string)
 	roomOneHistChan           = make(chan string)
 	roomTwoHistChan           = make(chan string)
+	subChannel                = make(chan []interface{})
 	newCatChannel             = make(chan [2]interface{})
 	joinChan                  = make(chan net.Conn)
 	requestsMonitor           = expvar.NewInt("Total Requests")
@@ -105,22 +106,14 @@ func handler(conn net.Conn) {
 				io.WriteString(conn, fmt.Sprintf("%v: %v\n", k, v))
 			}
 		case "SUB":
-			var user user
-			user.address = conn
-			subChannel := fields[1]
-			switch subChannel {
-			case "0":
-				rooms[0] = append(rooms[0], user)
-				io.WriteString(conn, fmt.Sprintf("Now subscribed to channel %v!\n", fields[1]))
-			case "1":
-				rooms[1] = append(rooms[1], user)
-				io.WriteString(conn, fmt.Sprintf("Now subscribed to channel %v!\n", fields[1]))
-			case "2":
-				rooms[2] = append(rooms[2], user)
-				io.WriteString(conn, fmt.Sprintf("Now subscribed to channel %v!\n", fields[1]))
-			default:
-				io.WriteString(conn, fmt.Sprintf("channel %v does not exist. Try the [LIST] command to see what channels are open.\n", subChannel))
+			var subArr = make([]interface{}, 2)
+			roomNum, err := strconv.Atoi(fields[1])
+			if err != nil {
+				panic(err)
 			}
+			subArr[0] = roomNum
+			subArr[1] = conn
+			subChannel <- subArr
 
 		case "NICK":
 			newName := fields[1]
@@ -200,9 +193,16 @@ func msgBroadcast() {
 			}
 		case new := <-newCatChannel:
 			categories = append(categories, new[1].(string))
-			rooms = append(rooms, make([]user, 1))
-			rooms[len(rooms)-1][0].address = new[0].(net.Conn)
+			rooms = append(rooms, make([]user, 0, 10))
 
+		case sub := <-subChannel:
+
+			var user user
+			roomNum := sub[0].(int)
+			user.address = sub[1].(net.Conn)
+
+			rooms[roomNum] = append(rooms[roomNum], user)
+			fmt.Println(rooms[roomNum])
 		}
 	}
 }
